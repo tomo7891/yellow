@@ -2,7 +2,7 @@
 // Bundle extension, https://github.com/datenstrom/yellow-extensions/tree/master/source/bundle
 
 class YellowBundle {
-    const VERSION = "0.8.21";
+    const VERSION = "0.8.26";
     public $yellow;         // access to API
 
     // Handle initialisation
@@ -19,7 +19,7 @@ class YellowBundle {
                 $cleanup = $action!="daily" || !$this->isBundleRequired($entry);
                 if ($cleanup && !$this->yellow->toolbox->deleteFile($entry)) $statusCode = 500;
             }
-            if ($statusCode==500) $this->yellow->log("error", "Can't delete files in directory '$path'!\n");
+            if ($statusCode==500) $this->yellow->log("error", "Can't delete files in directory '$path'!");
         }
     }
     
@@ -54,7 +54,7 @@ class YellowBundle {
                 array_push($dataOther, $line);
             }
         }
-        if (!defined("DEBUG")) {
+        if (!$this->yellow->system->get("coreDebugMode")) {
             $dataCss = $this->processBundle($dataCss, "css");
             $dataScriptDefer = $this->processBundle($dataScriptDefer, "js", "defer");
             $dataScriptNow = $this->processBundle($dataScriptNow, "js");
@@ -76,7 +76,7 @@ class YellowBundle {
             if (preg_match("/data-bundle=\"exclude\"/i", $value)) continue;
             if (substru($key, 0, strlenu($base))!=$base) continue;
             $location = substru($key, strlenu($base));
-            $fileName = $this->yellow->lookup->findFileFromSystem($location);
+            $fileName = $this->yellow->lookup->findFileFromMediaLocation($location);
             $modified = max($modified, $this->yellow->toolbox->getFileModified($fileName));
             if (is_readable($fileName)) {
                 array_push($fileNames, $fileName);
@@ -99,12 +99,10 @@ class YellowBundle {
                     $fileData = $this->yellow->toolbox->readFile($fileName);
                     $fileData = $this->processBundleConvert($scheme, $address, $base, $fileData, $fileName, $type);
                     $fileData = $this->processBundleMinify($scheme, $address, $base, $fileData, $fileName, $type);
-                    if (substrb($fileData, 0, 3)=="\xEF\xBB\xBF") $fileData = substrb($fileData, 3);
-                    if (substrb($fileData, 0, 13)=="\"use strict\";" || substrb($fileData, 0, 13)=="'use strict';") $fileData = substrb($fileData, 13);
                     if (!empty($fileDataBundle)) $fileDataBundle .= "\n\n";
-                    $fileDataBundle .= "/* ".basename($fileName)." */\n";
                     $fileDataBundle .= $fileData;
                 }
+                if ($type=="css") $fileDataBundle = $this->normaliseCss($fileDataBundle);
                 if (is_file($fileNameBundle)) $this->yellow->toolbox->deleteFile($fileNameBundle);
                 if (!$this->yellow->toolbox->createFile($fileNameBundle, $fileDataBundle) ||
                     !$this->yellow->toolbox->modifyFile($fileNameBundle, $modified)) {
@@ -140,7 +138,21 @@ class YellowBundle {
         $minifier = $type=="css" ? new MinifyCss() : new MinifyJavaScript();
         if (preg_match("/\.min/", $fileName)) $minifier = new MinifyBasic();
         $minifier->add($fileData);
-        return $minifier->minify();
+        $fileData = $minifier->minify();
+        if (substrb($fileData, 0, 3)=="\xEF\xBB\xBF") $fileData = substrb($fileData, 3);
+        if (substrb($fileData, 0, 13)=="\"use strict\";" || substrb($fileData, 0, 13)=="'use strict';") $fileData = substrb($fileData, 13);
+        return "/* ".basename($fileName)." */\n".$fileData;
+    }
+    
+    // Normalise CSS, move import rules to top
+    public function normaliseCss($fileData) {
+        if (preg_match_all("/(;?)(@import (?<url>url\()?(?P<quotes>[\"\']?).+?(?P=quotes)(?(url)\)));?/", $fileData, $matches)) {
+            foreach ($matches[0] as $match) {
+                $fileData = str_replace($match, "", $fileData);
+            }
+            $fileData = "/* Import rules from files */\n".implode(";", $matches[2]).";\n\n".$fileData;
+        }
+        return $fileData;
     }
     
     // Return bundle information
@@ -178,7 +190,7 @@ class YellowBundle {
         list($dummy, $fileNames, $modified) = $this->getBundleInformation($fileName);
         $idExpected = $idCurrent = $this->getBundleId($fileNames, $modified);
         if (preg_match("/^bundle-(.*)\.min/", basename($fileName), $matches)) $idCurrent = $matches[1];
-        return $idExpected==$idCurrent && !defined("DEBUG");
+        return $idExpected==$idCurrent && !$this->yellow->system->get("coreDebugMode");
     }
 }
     
@@ -1978,13 +1990,12 @@ class MinifyBasic extends Minify {
     // Minify data, remove only comments and empty lines
     public function execute($path = null) {
         $content = "";
-        $this->extractStrings();
+        $this->extractStrings("\'\"\`");
+        $this->registerPattern("/\/\*.*?\*\//s", "");
+        $this->registerPattern("/\/\/.*?[\r\n]+/", "");
+        $this->registerPattern("/[\r\n]+/", "");
         foreach ($this->data as $source => $data) {
-            $data = $this->replace($data);
-            $data = preg_replace("/\/\*.*?\*\//s", "", $data);
-            $data = preg_replace("/\/\/.*?[\r\n]+/", "", $data);
-            $data = preg_replace("/[\r\n]+/", "\n", $data);
-            $content .= trim($data);
+            $content .= $this->replace($data);
         }
         return $this->restoreExtractedData($content);
     }

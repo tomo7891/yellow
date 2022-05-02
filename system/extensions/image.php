@@ -2,7 +2,7 @@
 // Image extension, https://github.com/datenstrom/yellow-extensions/tree/master/source/image
 
 class YellowImage {
-    const VERSION = "0.8.12";
+    const VERSION = "0.8.16";
     public $yellow;             // access to API
 
     // Handle initialisation
@@ -11,8 +11,6 @@ class YellowImage {
         $this->yellow->system->setDefault("imageUploadWidthMax", "1280");
         $this->yellow->system->setDefault("imageUploadHeightMax", "1280");
         $this->yellow->system->setDefault("imageUploadJpgQuality", "80");
-        $this->yellow->system->setDefault("imageThumbnailLocation", "/media/thumbnails/");
-        $this->yellow->system->setDefault("imageThumbnailDirectory", "media/thumbnails/");
         $this->yellow->system->setDefault("imageThumbnailJpgQuality", "80");
         $this->yellow->language->setDefault("imageDefaultAlt");
     }
@@ -21,11 +19,11 @@ class YellowImage {
     public function onUpdate($action) {
         if ($action=="clean") {
             $statusCode = 200;
-            $path = $this->yellow->system->get("imageThumbnailDirectory");
+            $path = $this->yellow->lookup->findMediaDirectory("coreThumbnailLocation");
             foreach ($this->yellow->toolbox->getDirectoryEntries($path, "/.*/", false, false) as $entry) {
                 if (!$this->yellow->toolbox->deleteFile($entry)) $statusCode = 500;
             }
-            if ($statusCode==500) $this->yellow->log("error", "Can't delete files in directory '$path'!\n");
+            if ($statusCode==500) $this->yellow->log("error", "Can't delete files in directory '$path'!");
         }
     }
 
@@ -38,7 +36,8 @@ class YellowImage {
                 if (empty($alt)) $alt = $this->yellow->language->getText("imageDefaultAlt");
                 if (empty($width)) $width = "100%";
                 if (empty($height)) $height = $width;
-                list($src, $width, $height) = $this->getImageInformation($this->yellow->system->get("coreImageDirectory").$name, $width, $height);
+                $path = $this->yellow->lookup->findMediaDirectory("coreImageLocation");
+                list($src, $width, $height) = $this->getImageInformation($path.$name, $width, $height);
             } else {
                 if (empty($alt)) $alt = $this->yellow->language->getText("imageDefaultAlt");
                 $src = $this->yellow->lookup->normaliseUrl("", "", "", $name);
@@ -57,16 +56,25 @@ class YellowImage {
     public function onEditMediaFile($file, $action, $email) {
         if ($action=="upload") {
             $fileName = $file->fileName;
-            list($widthInput, $heightInput, $type) = $this->yellow->toolbox->detectImageInformation($fileName, $file->get("type"));
+            list($widthInput, $heightInput, $orientation, $type) =
+                $this->yellow->toolbox->detectImageInformation($fileName, $file->get("type"));
             $widthMax = $this->yellow->system->get("imageUploadWidthMax");
             $heightMax = $this->yellow->system->get("imageUploadHeightMax");
-            if (($widthInput>$widthMax || $heightInput>$heightMax) && ($type=="gif" || $type=="jpg" || $type=="png")) {
-                list($widthOutput, $heightOutput) = $this->getImageDimensionsFit($widthInput, $heightInput, $widthMax, $heightMax);
-                $image = $this->loadImage($fileName, $type);
-                $image = $this->resizeImage($image, $widthInput, $heightInput, $widthOutput, $heightOutput);
-                $image = $this->orientImage($image, $fileName, $type);
-                if (!$this->saveImage($image, $fileName, $type, $this->yellow->system->get("imageUploadJpgQuality"))) {
-                    $file->error(500, "Can't write file '$fileName'!");
+            if ($type=="gif" || $type=="jpg" || $type=="png") {
+                if ($widthInput>$widthMax || $heightInput>$heightMax) {
+                    list($widthOutput, $heightOutput) = $this->getImageDimensionsFit($widthInput, $heightInput, $widthMax, $heightMax);
+                    $image = $this->loadImage($fileName, $type);
+                    $image = $this->resizeImage($image, $widthInput, $heightInput, $widthOutput, $heightOutput);
+                    $image = $this->orientImage($image, $orientation);
+                    if (!$this->saveImage($image, $fileName, $type, $this->yellow->system->get("imageUploadJpgQuality"))) {
+                        $file->error(500, "Can't write file '$fileName'!");
+                    }
+                } elseif ($orientation>1) {
+                    $image = $this->loadImage($fileName, $type);
+                    $image = $this->orientImage($image, $orientation);
+                    if (!$this->saveImage($image, $fileName, $type, $this->yellow->system->get("imageUploadJpgQuality"))) {
+                        $file->error(500, "Can't write file '$fileName'!");
+                    }
                 }
             }
         }
@@ -74,8 +82,8 @@ class YellowImage {
 
     // Return image information, create thumbnail on demand
     public function getImageInformation($fileName, $widthOutput, $heightOutput) {
-        $fileNameShort = substru($fileName, strlenu($this->yellow->system->get("coreImageDirectory")));
-        list($widthInput, $heightInput, $type) = $this->yellow->toolbox->detectImageInformation($fileName);
+        $fileNameShort = substru($fileName, strlenu($this->yellow->lookup->findMediaDirectory("coreImageLocation")));
+        list($widthInput, $heightInput, $orientation, $type) = $this->yellow->toolbox->detectImageInformation($fileName);
         $widthOutput = $this->convertValueAndUnit($widthOutput, $widthInput);
         $heightOutput = $this->convertValueAndUnit($heightOutput, $heightInput);
         if (($widthInput==$widthOutput && $heightInput==$heightOutput) || $type=="svg" || $type=="") {
@@ -83,21 +91,22 @@ class YellowImage {
             $width = $widthOutput;
             $height = $heightOutput;
         } else {
+            $pathThumb = $this->yellow->lookup->findMediaDirectory("coreThumbnailLocation");
             $fileNameThumb = ltrim(str_replace(array("/", "\\", "."), "-", dirname($fileNameShort)."/".pathinfo($fileName, PATHINFO_FILENAME)), "-");
             $fileNameThumb .= "-".$widthOutput."x".$heightOutput;
             $fileNameThumb .= ".".pathinfo($fileName, PATHINFO_EXTENSION);
-            $fileNameOutput = $this->yellow->system->get("imageThumbnailDirectory").$fileNameThumb;
+            $fileNameOutput = $pathThumb.$fileNameThumb;
             if ($this->isFileNotUpdated($fileName, $fileNameOutput)) {
                 $image = $this->loadImage($fileName, $type);
                 $image = $this->resizeImage($image, $widthInput, $heightInput, $widthOutput, $heightOutput);
-                $image = $this->orientImage($image, $fileName, $type);
+                $image = $this->orientImage($image, $orientation);
                 if (is_file($fileNameOutput)) $this->yellow->toolbox->deleteFile($fileNameOutput);
                 if (!$this->saveImage($image, $fileNameOutput, $type, $this->yellow->system->get("imageThumbnailJpgQuality")) ||
                     !$this->yellow->toolbox->modifyFile($fileNameOutput, $this->yellow->toolbox->getFileModified($fileName))) {
                     $this->yellow->page->error(500, "Can't write file '$fileNameOutput'!");
                 }
             }
-            $src = $this->yellow->system->get("coreServerBase").$this->yellow->system->get("imageThumbnailLocation").$fileNameThumb;
+            $src = $this->yellow->system->get("coreServerBase").$this->yellow->system->get("coreThumbnailLocation").$fileNameThumb;
             list($width, $height) = $this->yellow->toolbox->detectImageInformation($fileNameOutput);
         }
         return array($src, $width, $height);
@@ -160,20 +169,15 @@ class YellowImage {
     }
     
     // Orient image automatically
-    public function orientImage($image, $fileName, $type) {
-        if ($type=="jpg") {
-            $exif = @exif_read_data($fileName);
-            if ($exif && isset($exif["Orientation"])) {
-                switch ($exif["Orientation"]) {
-                    case 2: imageflip($image, IMG_FLIP_HORIZONTAL); break;
-                    case 3: $image = imagerotate($image, 180, 0); break;
-                    case 4: imageflip($image, IMG_FLIP_VERTICAL); break;
-                    case 5: $image = imagerotate($image, 90, 0); imageflip($image, IMG_FLIP_VERTICAL); break;
-                    case 6: $image = imagerotate($image, -90, 0); break;
-                    case 7: $image = imagerotate($image, 90, 0); imageflip($image, IMG_FLIP_HORIZONTAL); break;
-                    case 8: $image = imagerotate($image, 90, 0); break;
-                }
-            }
+    public function orientImage($image, $orientation) {
+        switch ($orientation) {
+            case 2: imageflip($image, IMG_FLIP_HORIZONTAL); break;
+            case 3: $image = imagerotate($image, 180, 0); break;
+            case 4: imageflip($image, IMG_FLIP_VERTICAL); break;
+            case 5: $image = imagerotate($image, 90, 0); imageflip($image, IMG_FLIP_VERTICAL); break;
+            case 6: $image = imagerotate($image, -90, 0); break;
+            case 7: $image = imagerotate($image, 90, 0); imageflip($image, IMG_FLIP_HORIZONTAL); break;
+            case 8: $image = imagerotate($image, 90, 0); break;
         }
         return $image;
     }

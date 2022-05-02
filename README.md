@@ -1,15 +1,9 @@
-# Datenstrom Yellow 0.8.17
+<p align="right"><a href="README-de.md">Deutsch</a> &nbsp; <a href="README.md">English</a> &nbsp; <a href="README-sv.md">Svenska</a></p>
 
-Datenstrom Yellow is for people who make small websites.
+# Datenstrom Yellow 0.8.19
 
-1. [Download Datenstrom Yellow](https://github.com/datenstrom/yellow/archive/master.zip).
-2. Unzip and copy all files to your web server.
-3. Open your website in a web browser.
+Datenstrom Yellow is for people who make small websites. https://datenstrom.se/yellow/
 
-Do you have questions? [Get help](https://datenstrom.se/yellow/help/) and [contribute](https://datenstrom.se/yellow/help/contributing-guidelines).
+Installing is unzipping one file and you are ready to go. The most important things for small websites are included. You can add features, themes and languages. Datenstrom Yellow works as content management system and static site generator. [Get started](https://datenstrom.se/yellow/help/how-to-get-started).
 
-<p>
-<a href="README-de.md"><img src="https://raw.githubusercontent.com/datenstrom/yellow-extensions/master/source/help/language-de.png" width="15" height="15" alt="Deutsch">&nbsp; Deutsch</a>&nbsp;
-<a href="README.md"><img src="https://raw.githubusercontent.com/datenstrom/yellow-extensions/master/source/help/language-en.png" width="15" height="15" alt="English">&nbsp; English</a>&nbsp;
-<a href="README-sv.md"><img src="https://raw.githubusercontent.com/datenstrom/yellow-extensions/master/source/help/language-sv.png" width="15" height="15" alt="Svenska">&nbsp; Svenska</a>&nbsp;
-</p>
+Do you have questions? [Get help](https://datenstrom.se/yellow/help/).
