@@ -2,7 +2,7 @@
 // Core extension, https://github.com/datenstrom/yellow-extensions/tree/master/source/core
 
 class YellowCore {
-    const VERSION = "0.8.80";
+    const VERSION = "0.8.89";
     const RELEASE = "0.8.20";
     public $page;           // current page
     public $content;        // content files
@@ -15,7 +15,6 @@ class YellowCore {
     public $toolbox;        // toolbox with helper functions
 
     public function __construct() {
-        $this->checkRequirements();
         $this->page = new YellowPage($this);
         $this->content = new YellowContent($this);
         $this->media = new YellowMedia($this);
@@ -25,6 +24,7 @@ class YellowCore {
         $this->extension = new YellowExtension($this);
         $this->lookup = new YellowLookup($this);
         $this->toolbox = new YellowToolbox();
+        $this->checkRequirements();
         $this->system->setDefault("sitename", "Localhost");
         $this->system->setDefault("author", "Datenstrom");
         $this->system->setDefault("email", "webmaster");
@@ -61,13 +61,11 @@ class YellowCore {
     
     // Check requirements
     public function checkRequirements() {
-        $troubleshooting = PHP_SAPI!="cli" ?
-            "<a href=\"".$this->getTroubleshootingUrl()."\">See troubleshooting</a>." : "See ".$this->getTroubleshootingUrl();
-        version_compare(PHP_VERSION, "7.0", ">=") || die("Datenstrom Yellow requires PHP 7.0 or higher! $troubleshooting\n");
-        extension_loaded("curl") || die("Datenstrom Yellow requires PHP curl extension! $troubleshooting\n");
-        extension_loaded("gd") || die("Datenstrom Yellow requires PHP gd extension! $troubleshooting\n");
-        extension_loaded("mbstring") || die("Datenstrom Yellow requires PHP mbstring extension! $troubleshooting\n");
-        extension_loaded("zip") || die("Datenstrom Yellow requires PHP zip extension! $troubleshooting\n");
+        if (!version_compare(PHP_VERSION, "7.0", ">=")) $this->exitFatalError("Datenstrom Yellow requires PHP 7.0 or higher!");
+        if (!extension_loaded("curl")) $this->exitFatalError("Datenstrom Yellow requires PHP curl extension!");
+        if (!extension_loaded("gd")) $this->exitFatalError("Datenstrom Yellow requires PHP gd extension!");
+        if (!extension_loaded("mbstring")) $this->exitFatalError("Datenstrom Yellow requires PHP mbstring extension!");
+        if (!extension_loaded("zip")) $this->exitFatalError("Datenstrom Yellow requires PHP zip extension!");
         mb_internal_encoding("UTF-8");
     }
     
@@ -178,6 +176,15 @@ class YellowCore {
                 "<a href=\"".$this->getTroubleshootingUrl()."\">See troubleshooting</a>." : "See ".$this->getTroubleshootingUrl();
             echo "<br/>\nCheck the log file. Activate the debug mode for more information. $troubleshooting\n";
         }
+    }
+    
+    // Show error message and terminate immediately
+    public function exitFatalError($errorMessage = "") {
+        @header($this->toolbox->getHttpStatusFormatted(500));
+        $troubleshooting = PHP_SAPI!="cli" ?
+            "<a href=\"".$this->getTroubleshootingUrl()."\">See troubleshooting</a>." : "See ".$this->getTroubleshootingUrl();
+        echo "$errorMessage $troubleshooting\n";
+        exit(1);
     }
     
     // Send page response
@@ -421,6 +428,11 @@ class YellowPage {
 
     public function __construct($yellow) {
         $this->yellow = $yellow;
+        $this->scheme = "";
+        $this->address = "";
+        $this->base = "";
+        $this->location = "";
+        $this->fileName = "";
         $this->metaData = new YellowArray();
         $this->pageCollections = array();
         $this->sharedPages = array();
@@ -463,6 +475,7 @@ class YellowPage {
     // Parse page meta data
     public function parseMetaData() {
         $this->metaData = new YellowArray();
+        $this->metaDataOffsetBytes = 0;
         if (!is_null($this->rawData)) {
             $this->set("title", $this->yellow->toolbox->createTextTitle($this->location));
             $this->set("language", $this->yellow->lookup->findContentLanguage($this->fileName, $this->yellow->system->get("language")));
@@ -487,6 +500,7 @@ class YellowPage {
                 rtrim($this->yellow->system->get("editLocation"), "/").$this->location));
             $this->parseMetaDataShared();
         } else {
+            $this->set("size", filesize($this->fileName));
             $this->set("type", $this->yellow->toolbox->getFileType($this->fileName));
             $this->set("group", $this->yellow->toolbox->getFileGroup($this->fileName, $this->yellow->system->get("coreMediaDirectory")));
             $this->set("modified", date("Y-m-d H:i:s", $this->yellow->toolbox->getFileModified($this->fileName)));
@@ -529,13 +543,13 @@ class YellowPage {
     }
     
     // Parse page content on demand
-    public function parseContent($sizeMax = 0) {
+    public function parseContent() {
         if (!is_null($this->rawData) && !is_object($this->parser)) {
             if ($this->yellow->extension->isExisting($this->get("parser"))) {
                 $value = $this->yellow->extension->data[$this->get("parser")];
                 if (method_exists($value["object"], "onParseContentRaw")) {
                     $this->parser = $value["object"];
-                    $this->parserData = $this->getContent(true, $sizeMax);
+                    $this->parserData = $this->getContent(true);
                     $this->parserData = preg_replace("/@pageReadUrl/i", $this->get("pageReadUrl"), $this->parserData);
                     $this->parserData = preg_replace("/@pageEditUrl/i", $this->get("pageEditUrl"), $this->parserData);
                     $this->parserData = $this->parser->onParseContentRaw($this, $this->parserData);
@@ -547,7 +561,7 @@ class YellowPage {
                     }
                 }
             } else {
-                $this->parserData = $this->getContent(true, $sizeMax);
+                $this->parserData = $this->getContent(true);
                 $this->parserData = preg_replace("/\[yellow error\]/i", $this->errorMessage, $this->parserData);
             }
             if (!$this->isExisting("description")) {
@@ -712,15 +726,15 @@ class YellowPage {
     }
     
     // Return page content, HTML encoded or raw format
-    public function getContent($rawFormat = false, $sizeMax = 0) {
+    public function getContent($rawFormat = false) {
         if ($rawFormat) {
             $this->parseMetaUpdate();
             $text = substrb($this->rawData, $this->metaDataOffsetBytes);
         } else {
-            $this->parseContent($sizeMax);
+            $this->parseContent();
             $text = $this->parserData;
         }
-        return $sizeMax ? substrb($text, 0, $sizeMax) : $text;
+        return $text;
     }
     
     // Return parent page, null if none
@@ -979,8 +993,22 @@ class YellowPageCollection extends ArrayObject {
         $this->yellow = $yellow;
     }
     
+    // Append to end of page collection
+    #[\ReturnTypeWillChange]
+    public function append($page) {
+        parent::append($page);
+    }
+    
+    // Prepend to start of page collection
+    #[\ReturnTypeWillChange]
+    public function prepend($page) {
+        $array = $this->getArrayCopy();
+        array_unshift($array, $page);
+        $this->exchangeArray($array);
+    }
+    
     // Filter page collection by page setting
-    public function filter($key, $value, $exactMatch = true) {
+    public function filter($key, $value, $exactMatch = true): YellowPageCollection {
         $array = array();
         $value = str_replace(" ", "-", strtoloweru($value));
         $valueLength = strlenu($value);
@@ -1002,7 +1030,7 @@ class YellowPageCollection extends ArrayObject {
     }
     
     // Filter page collection by location or file
-    public function match($regex = "/.*/", $filterByLocation = true) {
+    public function match($regex = "/.*/", $filterByLocation = true): YellowPageCollection {
         $array = array();
         $this->filterValue = $regex;
         foreach ($this->getArrayCopy() as $page) {
@@ -1013,17 +1041,17 @@ class YellowPageCollection extends ArrayObject {
     }
     
     // Sort page collection by page setting
-    public function sort($key, $ascendingOrder = true) {
+    public function sort($key, $ascendingOrder = true): YellowPageCollection {
         $array = $this->getArrayCopy();
         $sortIndex = 0;
         foreach ($array as $page) {
-            $page->set("sortindex", ++$sortIndex);
+            $page->set("sortIndex", ++$sortIndex);
         }
         $callback = function ($a, $b) use ($key, $ascendingOrder) {
             $result = $ascendingOrder ?
                 strnatcasecmp($a->get($key), $b->get($key)) :
                 strnatcasecmp($b->get($key), $a->get($key));
-            return $result==0 ? $a->get("sortindex") - $b->get("sortindex") : $result;
+            return $result==0 ? $a->get("sortIndex") - $b->get("sortIndex") : $result;
         };
         usort($array, $callback);
         $this->exchangeArray($array);
@@ -1031,38 +1059,38 @@ class YellowPageCollection extends ArrayObject {
     }
     
     // Sort page collection by settings similarity
-    public function similar($page, $ascendingOrder = false) {
+    public function similar($page, $ascendingOrder = false): YellowPageCollection {
         $location = $page->location;
         $keywords = strtoloweru($page->get("title").",".$page->get("tag").",".$page->get("author"));
         $tokens = array_unique(array_filter(preg_split("/[,\s\(\)\+\-]/", $keywords), "strlen"));
         if (!empty($tokens)) {
             $array = array();
             foreach ($this->getArrayCopy() as $page) {
-                $searchScore = 0;
+                $sortScore = 0;
                 foreach ($tokens as $token) {
-                    if (stristr($page->get("title"), $token)) $searchScore += 50;
-                    if (stristr($page->get("tag"), $token)) $searchScore += 5;
-                    if (stristr($page->get("author"), $token)) $searchScore += 2;
+                    if (stristr($page->get("title"), $token)) $sortScore += 50;
+                    if (stristr($page->get("tag"), $token)) $sortScore += 5;
+                    if (stristr($page->get("author"), $token)) $sortScore += 2;
                 }
                 if ($page->location!=$location) {
-                    $page->set("searchscore", $searchScore);
+                    $page->set("sortScore", $sortScore);
                     array_push($array, $page);
                 }
             }
             $this->exchangeArray($array);
-            $this->sort("modified", $ascendingOrder)->sort("searchscore", $ascendingOrder);
+            $this->sort("modified", $ascendingOrder)->sort("sortScore", $ascendingOrder);
         }
         return $this;
     }
 
     // Calculate union, merge page collection
-    public function merge($input) {
+    public function merge($input): YellowPageCollection {
         $this->exchangeArray(array_merge($this->getArrayCopy(), (array)$input));
         return $this;
     }
     
     // Calculate intersection, remove pages that are not present in another page collection
-    public function intersect($input) {
+    public function intersect($input): YellowPageCollection {
         $callback = function ($a, $b) {
             return strcmp(spl_object_hash($a), spl_object_hash($b));
         };
@@ -1071,7 +1099,7 @@ class YellowPageCollection extends ArrayObject {
     }
 
     // Calculate difference, remove pages that are present in another page collection
-    public function diff($input) {
+    public function diff($input): YellowPageCollection {
         $callback = function ($a, $b) {
             return strcmp(spl_object_hash($a), spl_object_hash($b));
         };
@@ -1079,34 +1107,20 @@ class YellowPageCollection extends ArrayObject {
         return $this;
     }
     
-    // Append to end of page collection
-    public function append($page) {
-        parent::append($page);
-        return $this;
-    }
-    
-    // Prepend to start of page collection
-    public function prepend($page) {
-        $array = $this->getArrayCopy();
-        array_unshift($array, $page);
-        $this->exchangeArray($array);
-        return $this;
-    }
-    
     // Limit the number of pages in page collection
-    public function limit($pagesMax) {
+    public function limit($pagesMax): YellowPageCollection {
         $this->exchangeArray(array_slice($this->getArrayCopy(), 0, $pagesMax));
         return $this;
     }
     
     // Reverse page collection
-    public function reverse() {
+    public function reverse(): YellowPageCollection {
         $this->exchangeArray(array_reverse($this->getArrayCopy()));
         return $this;
     }
     
     // Randomize page collection
-    public function shuffle() {
+    public function shuffle(): YellowPageCollection {
         $array = $this->getArrayCopy();
         shuffle($array);
         $this->exchangeArray($array);
@@ -1114,7 +1128,7 @@ class YellowPageCollection extends ArrayObject {
     }
 
     // Paginate page collection
-    public function paginate($limit) {
+    public function paginate($limit): YellowPageCollection {
         if (!$this->isPagination() && $limit!=0) {
             $this->paginationNumber = 1;
             $this->paginationCount = ceil($this->count() / $limit);
@@ -1816,7 +1830,7 @@ class YellowLanguage {
         $monthGenitive = $dateMonthsGenitive[date("n", $timestamp) - 1];
         $weekday = $dateWeekdays[date("N", $timestamp) - 1];
         $timeZone = $this->yellow->system->get("coreTimezone");
-        $timeZoneHelper = new DateTime(null, new DateTimeZone($timeZone));
+        $timeZoneHelper = new DateTime("now", new DateTimeZone($timeZone));
         $timeZoneOffset = $timeZoneHelper->getOffset();
         $timeZoneAbbreviation = "GMT".($timeZoneOffset<0 ? "-" : "+").abs(intval($timeZoneOffset/3600));
         $format = preg_replace("/(?<!\\\)F/", addcslashes($monthNominative, "A..Za..z"), $format);
@@ -1831,7 +1845,7 @@ class YellowLanguage {
     // Return human readable date, relative to today
     public function getDateRelative($timestamp, $format, $daysLimit, $language = "") {
         $timeDifference = time() - $timestamp;
-        $days = abs(intval($timeDifference / 86400));
+        $days = abs(intval($timeDifference/86400));
         $key = $timeDifference>=0 ? "coreDatePast" : "coreDateFuture";
         $tokens = preg_split("/\s*,\s*/", $this->getText($key, $language));
         if (count($tokens)>=8) {
@@ -2945,7 +2959,7 @@ class YellowToolbox {
         $text = preg_replace("/\s+/s", " ", trim($text));
         $tokens = str_getcsv($text, " ", "\"");
         foreach ($tokens as $key=>$value) {
-            if ($value==$optional) $tokens[$key] = "";
+            if (is_null($value) || $value==$optional) $tokens[$key] = "";
         }
         return array_pad($tokens, $sizeMin, "");
     }
@@ -2986,6 +3000,7 @@ class YellowToolbox {
         $elementsVoid = array("area", "br", "col", "embed", "hr", "img", "input", "param", "source", "wbr");
         if ($lengthMax==0) $lengthMax = strlenu($text);
         if ($removeHtml) {
+            $hiddenLevel = 0;
             $offsetBytes = 0;
             while (true) {
                 $elementFound = preg_match("/<(\/?)([\!\?\w]+)(.*?)(\/?)>/s", $text, $matches, PREG_OFFSET_CAPTURE, $offsetBytes);
@@ -2993,7 +3008,9 @@ class YellowToolbox {
                 $elementRawData = isset($matches[0][0]) ? $matches[0][0] : "";
                 $elementStart = isset($matches[1][0]) ? $matches[1][0] : "";
                 $elementName = isset($matches[2][0]) ? $matches[2][0] : "";
-                if (!strempty($elementBefore)) {
+                $elementAttributes = isset($matches[3][0]) ? $matches[3][0] : "";
+                $elementEnd = isset($matches[4][0]) ? $matches[4][0] : "";
+                if (!strempty($elementBefore) && !$hiddenLevel) {
                     $rawText = preg_replace("/\s+/s", " ", html_entity_decode($elementBefore, ENT_QUOTES, "UTF-8"));
                     if (empty($elementStart) && in_array(strtolower($elementName), $elementsBlock)) $rawText = rtrim($rawText)." ";
                     if (substru($rawText, 0, 1)==" " && (empty($output) || substru($output, -1)==" ")) $rawText = ltrim($rawText);
@@ -3005,6 +3022,15 @@ class YellowToolbox {
                     $lengthMax = 0;
                 }
                 if ($lengthMax<=0 || !$elementFound) break;
+                if ($hiddenLevel>0 || preg_match("/aria-hidden=\"true\"/i", $elementAttributes)) {
+                    if (!empty($elementName) && empty($elementEnd) && !in_array(strtolower($elementName), $elementsVoid)) {
+                        if (empty($elementStart)) {
+                            ++$hiddenLevel;
+                        } else {
+                            --$hiddenLevel;
+                        }
+                    }
+                }
                 $offsetBytes = $matches[0][1] + strlenb($matches[0][0]);
             }
             $output = preg_replace("/\s+\…$/s", "…", $output);
@@ -3236,10 +3262,15 @@ class YellowToolbox {
     
     // Detect server timezone
     public function detectServerTimezone() {
-        $timezone = @date_default_timezone_get();
-        if (PHP_OS=="Darwin" && $timezone=="UTC") {
-            if (preg_match("#zoneinfo/(.*)#", @readlink("/etc/localtime"), $matches)) $timezone = $matches[1];
+        $timezone = ini_get("date.timezone");
+        if (empty($timezone)) {
+            if (PHP_OS=="Darwin") {
+                if (preg_match("#zoneinfo/(.*)#", @readlink("/etc/localtime"), $matches)) $timezone = $matches[1];
+            } else {
+                if (preg_match("/^(\S+)\/(\S+)/", $this->readFile("/etc/timezone"), $matches)) $timezone = $matches[1];
+            }
         }
+        if (!in_array($timezone, timezone_identifiers_list())) $timezone = "UTC";
         return $timezone;
     }
     
@@ -3251,7 +3282,7 @@ class YellowToolbox {
         if (preg_match("/^(\S+)\/(\S+)/", $this->getServer("SERVER_SOFTWARE"), $matches)) {
             $name = $matches[1];
             $version = $matches[2];
-        } elseif (preg_match("/^(\S+)/u", $this->getServer("SERVER_SOFTWARE"), $matches)) {
+        } elseif (preg_match("/^(\S+)/", $this->getServer("SERVER_SOFTWARE"), $matches)) {
             $name = $matches[1];
         }
         if (PHP_SAPI=="cli" || PHP_SAPI=="cli-server") {
@@ -3277,6 +3308,28 @@ class YellowToolbox {
             }
         }
         return $languageFound;
+    }
+    
+    // Detect terminal width and height
+    public function detectTerminalInformation() {
+        $width = $height = 0;
+        if (strtoupperu(substru(PHP_OS, 0, 3))=="WIN") {
+            exec("powershell \$Host.UI.RawUI.WindowSize.Width", $outputLines, $returnStatus);
+            if ($returnStatus==0 && !empty($outputLines)) {
+                $width = intval(end($outputLines));
+            }
+            exec("powershell \$Host.UI.RawUI.WindowSize.Height", $outputLines, $returnStatus);
+            if ($returnStatus==0 && !empty($outputLines)) {
+                $height = intval(end($outputLines));
+            }
+        } else {
+            exec("stty size", $outputLines, $returnStatus);
+            if ($returnStatus==0 && preg_match("/^(\d+)\s+(\d+)/", implode("\n", $outputLines), $matches)) {
+                $width = intval($matches[2]);
+                $height = intval($matches[1]);
+            }
+        }
+        return array($width, $height);
     }
     
     // Detect image width, height, orientation and type for GIF/JPG/PNG/SVG
@@ -3565,24 +3618,28 @@ class YellowArray extends ArrayObject {
     }
     
     // Return array element
+    #[\ReturnTypeWillChange]
     public function offsetGet($key) {
         if (is_string($key)) $key = lcfirst($key);
         return parent::offsetGet($key);
     }
     
     // Set array element
+    #[\ReturnTypeWillChange]
     public function offsetSet($key, $value) {
         if (is_string($key)) $key = lcfirst($key);
         parent::offsetSet($key, $value);
     }
     
     // Remove array element
+    #[\ReturnTypeWillChange]
     public function offsetUnset($key) {
         if (is_string($key)) $key = lcfirst($key);
         parent::offsetUnset($key);
     }
     
     // Check if array element exists
+    #[\ReturnTypeWillChange]
     public function offsetExists($key) {
         if (is_string($key)) $key = lcfirst($key);
         return parent::offsetExists($key);

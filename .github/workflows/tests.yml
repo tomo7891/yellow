@@ -1,4 +1,6 @@
-name: Tests
+# Datenstrom Yellow system tests
+
+name: System tests
 on: [push, pull_request]
 jobs:
   tests:
@@ -15,6 +17,7 @@ jobs:
         with:
           php-version: ${{ matrix.php }}
           extensions: curl, gd, mbstring, zip
+          ini-file: development
           coverage: none
           tools: none
       - name: Set up problem matcher
