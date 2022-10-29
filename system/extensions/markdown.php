@@ -1,8 +1,8 @@
 <?php
-// Markdown extension, https://github.com/datenstrom/yellow-extensions/tree/master/source/markdown
+// Markdown extension, https://github.com/annaesvensson/yellow-markdown
 
 class YellowMarkdown {
-    const VERSION = "0.8.21";
+    const VERSION = "0.8.22";
     public $yellow;         // access to API
     
     // Handle initialisation
@@ -3875,7 +3875,7 @@ class YellowMarkdownParser extends MarkdownExtraParser {
     public function doAutoLinks($text) {
         $text = preg_replace_callback("/<(\w+:[^\'\">\s]+)>/", array($this, "_doAutoLinks_url_callback"), $text);
         $text = preg_replace_callback("/<([\w\+\-\.]+@[\w\-\.]+)>/", array($this, "_doAutoLinks_email_callback"), $text);
-        $text = preg_replace_callback("/^\s*\[(\w+)(.*?)\]\s*$/", array($this, "_doAutoLinks_shortcutBlock_callback"), $text);
+        $text = preg_replace_callback("/^\s*\[(\w+)([^\]]*)\]\s*$/", array($this, "_doAutoLinks_shortcutBlock_callback"), $text);
         $text = preg_replace_callback("/\[(\w+)(.*?)\]/", array($this, "_doAutoLinks_shortcutInline_callback"), $text);
         $text = preg_replace_callback("/\[\-\-(.*?)\-\-\]/", array($this, "_doAutoLinks_shortcutComment_callback"), $text);
         $text = preg_replace_callback("/\:([\w\+\-\_]+)\:/", array($this, "_doAutoLinks_shortcutSymbol_callback"), $text);

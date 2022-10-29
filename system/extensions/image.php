@@ -1,8 +1,8 @@
 <?php
-// Image extension, https://github.com/datenstrom/yellow-extensions/tree/master/source/image
+// Image extension, https://github.com/annaesvensson/yellow-image
 
 class YellowImage {
-    const VERSION = "0.8.16";
+    const VERSION = "0.8.17";
     public $yellow;             // access to API
 
     // Handle initialisation
@@ -12,7 +12,6 @@ class YellowImage {
         $this->yellow->system->setDefault("imageUploadHeightMax", "1280");
         $this->yellow->system->setDefault("imageUploadJpgQuality", "80");
         $this->yellow->system->setDefault("imageThumbnailJpgQuality", "80");
-        $this->yellow->language->setDefault("imageDefaultAlt");
     }
     
     // Handle update

@@ -1,8 +1,8 @@
 <?php
-// Edit extension, https://github.com/datenstrom/yellow-extensions/tree/master/source/edit
+// Edit extension, https://github.com/annaesvensson/yellow-edit
 
 class YellowEdit {
-    const VERSION = "0.8.63";
+    const VERSION = "0.8.65";
     public $yellow;         // access to API
     public $response;       // web response
     public $merge;          // text merge
@@ -29,7 +29,6 @@ class YellowEdit {
         $this->yellow->system->setDefault("editLoginRestriction", "0");
         $this->yellow->system->setDefault("editLoginSessionTimeout", "2592000");
         $this->yellow->system->setDefault("editBruteForceProtection", "25");
-        $this->yellow->language->setDefault("editMailFooter");
     }
     
     // Handle update
@@ -141,9 +140,7 @@ class YellowEdit {
     public function userShow($command, $text) {
         $data = array();
         foreach ($this->yellow->user->settings as $key=>$value) {
-            $name = $value["name"];
-            if (preg_match("/\s/", $name)) $name = "\"$name\"";
-            $data[$key] = "$value[email] $name $value[status]";
+            $data[$key] = "$value[email] - User account by $value[name].";
         }
         uksort($data, "strnatcasecmp");
         foreach ($data as $line) echo "$line\n";
@@ -1244,7 +1241,7 @@ class YellowEditResponse {
                 $data["coreExtensions"][$key] = $value["class"];
             }
             $data["coreLanguages"] = array();
-            foreach ($this->yellow->system->getValues("language") as $language) {
+            foreach ($this->yellow->system->getAvailable("language") as $language) {
                 $data["coreLanguages"][$language] = $this->yellow->language->getTextHtml("languageDescription", $language);
             }
             $data["editSettingsActions"] = $this->getSettingsActions();

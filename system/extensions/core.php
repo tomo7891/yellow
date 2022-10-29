@@ -1,15 +1,15 @@
 <?php
-// Core extension, https://github.com/datenstrom/yellow-extensions/tree/master/source/core
+// Core extension, https://github.com/annaesvensson/yellow-core
 
 class YellowCore {
-    const VERSION = "0.8.89";
-    const RELEASE = "0.8.20";
+    const VERSION = "0.8.96";
+    const RELEASE = "0.8.21";
     public $page;           // current page
     public $content;        // content files
     public $media;          // media files
     public $system;         // system settings
-    public $user;           // user settings
     public $language;       // language settings
+    public $user;           // user settings
     public $extension;      // extensions
     public $lookup;         // location and file lookup
     public $toolbox;        // toolbox with helper functions
@@ -19,8 +19,8 @@ class YellowCore {
         $this->content = new YellowContent($this);
         $this->media = new YellowMedia($this);
         $this->system = new YellowSystem($this);
-        $this->user = new YellowUser($this);
         $this->language = new YellowLanguage($this);
+        $this->user = new YellowUser($this);
         $this->extension = new YellowExtension($this);
         $this->lookup = new YellowLookup($this);
         $this->toolbox = new YellowToolbox();
@@ -28,9 +28,9 @@ class YellowCore {
         $this->system->setDefault("sitename", "Localhost");
         $this->system->setDefault("author", "Datenstrom");
         $this->system->setDefault("email", "webmaster");
+        $this->system->setDefault("language", "en");
         $this->system->setDefault("layout", "default");
         $this->system->setDefault("theme", "default");
-        $this->system->setDefault("language", "en");
         $this->system->setDefault("parser", "markdown");
         $this->system->setDefault("status", "public");
         $this->system->setDefault("coreServerUrl", "auto");
@@ -50,9 +50,6 @@ class YellowCore {
         $this->system->setDefault("coreThemeLocation", "/media/themes/");
         $this->system->setDefault("coreMultiLanguageMode", "0");
         $this->system->setDefault("coreDebugMode", "0");
-        $this->language->setDefault("coreDateFormatShort");
-        $this->language->setDefault("coreDateFormatMedium");
-        $this->language->setDefault("coreDateFormatLong");
     }
     
     public function __destruct() {
@@ -91,10 +88,9 @@ class YellowCore {
             error_reporting(E_ALL);
         }
         date_default_timezone_set($this->system->get("coreTimezone"));
-        $this->user->load($this->system->get("coreExtensionDirectory").$this->system->get("coreUserFile"));
-        $this->language->load($this->system->get("coreExtensionDirectory"));
-        $this->language->load($this->system->get("coreExtensionDirectory").$this->system->get("coreLanguageFile"));
         $this->extension->load($this->system->get("coreExtensionDirectory"));
+        $this->language->load($this->system->get("coreExtensionDirectory").$this->system->get("coreLanguageFile"));
+        $this->user->load($this->system->get("coreExtensionDirectory").$this->system->get("coreUserFile"));
         $this->startup();
     }
     
@@ -119,7 +115,7 @@ class YellowCore {
         if ($this->page->isError()) $statusCode = $this->processRequestError();
         ob_end_flush();
         $this->toolbox->timerStop($time);
-        if ($this->system->get("coreDebugMode")>=1 && $this->lookup->isContentFile($fileName)) {
+        if ($this->system->get("coreDebugMode")>=1 && ($this->lookup->isContentFile($fileName) || $this->page->isError())) {
             echo "YellowCore::request status:$statusCode time:$time ms<br/>\n";
         }
         return $statusCode;
@@ -144,12 +140,12 @@ class YellowCore {
         if ($statusCode==0) {
             if ($this->lookup->isContentFile($fileName)) {
                 $statusCode = $this->sendPage($scheme, $address, $base, $location, $fileName, $cacheable, true);
-            } else {
+            } elseif (!empty($fileName)) {
                 $statusCode = $this->sendFile(200, $fileName, $cacheable);
             }
             if (!is_readable($fileName)) $this->page->error(404);
         }
-        if ($this->system->get("coreDebugMode")>=1 && $this->lookup->isContentFile($fileName)) {
+        if ($this->system->get("coreDebugMode")>=1 && ($this->lookup->isContentFile($fileName) || $this->page->isError())) {
             echo "YellowCore::processRequest file:$fileName<br/>\n";
         }
         return $statusCode;
@@ -203,11 +199,11 @@ class YellowCore {
             foreach ($this->page->headerData as $key=>$value) {
                 echo "YellowCore::sendPage $key: $value<br/>\n";
             }
+            $language = $this->page->get("language");
             $layout = $this->page->get("layout");
             $theme = $this->page->get("theme");
-            $language = $this->page->get("language");
             $parser = $this->page->get("parser");
-            echo "YellowCore::sendPage layout:$layout theme:$theme language:$language parser:$parser<br/>\n";
+            echo "YellowCore::sendPage language:$language layout:$layout theme:$theme parser:$parser<br/>\n";
         }
         return $statusCode;
     }
@@ -350,6 +346,7 @@ class YellowCore {
             }
         }
         $location = substru($this->toolbox->detectServerLocation(), strlenu($base));
+        $fileName = "";
         if (empty($fileName)) $fileName = $this->lookup->findFileFromMediaLocation($location);
         if (empty($fileName)) $fileName = $this->lookup->findFileFromContentLocation($location);
         return array($scheme, $address, $base, $location, $fileName);
@@ -1601,6 +1598,38 @@ class YellowSystem {
         return htmlspecialchars($this->get($key));
     }
     
+    // Return different value for system setting
+    public function getDifferent($key) {
+        return reset(array_diff($this->getAvailable($key), array($this->get($key))));
+    }
+
+    // Return available values for system setting
+    public function getAvailable($key) {
+        $values = array();
+        $valueDefault = isset($this->settingsDefaults[$key]) ? $this->settingsDefaults[$key] : "";
+        if ($key=="email") {
+            foreach ($this->yellow->user->settings as $userKey=>$userValue) {
+                array_push($values, $userKey);
+            }
+        } elseif ($key=="language") {
+            foreach ($this->yellow->language->settings as $languageKey=>$languageValue) {
+                array_push($values, $languageKey);
+            }
+        } elseif ($key=="layout") {
+            $path = $this->yellow->system->get("coreLayoutDirectory");
+            foreach ($this->yellow->toolbox->getDirectoryEntries($path, "/^.*\.html$/", true, false, false) as $entry) {
+                array_push($values, lcfirst(substru($entry, 0, -5)));
+            }
+        } elseif ($key=="theme") {
+            $path = $this->yellow->system->get("coreThemeDirectory");
+            foreach ($this->yellow->toolbox->getDirectoryEntries($path, "/^.*\.css$/", true, false, false) as $entry) {
+                array_push($values, lcfirst(substru($entry, 0, -4)));
+            }
+        }
+        return count($values) ? $values : array($valueDefault);
+    }
+    public function getValues($key) { return $this->getAvailable($key); } //TODO: remove later, for backwards compatibility
+    
     // Return system settings
     public function getSettings($filterStart = "", $filterEnd = "") {
         $settings = array();
@@ -1615,31 +1644,6 @@ class YellowSystem {
         return $settings;
     }
     
-    // Return supported values for system setting, empty if not known
-    public function getValues($key) {
-        $values = array();
-        if ($key=="email") {
-            foreach ($this->yellow->user->settings as $userKey=>$userValue) {
-                array_push($values, $userKey);
-            }
-        } elseif ($key=="layout") {
-            $path = $this->yellow->system->get("coreLayoutDirectory");
-            foreach ($this->yellow->toolbox->getDirectoryEntries($path, "/^.*\.html$/", true, false, false) as $entry) {
-                array_push($values, lcfirst(substru($entry, 0, -5)));
-            }
-        } elseif ($key=="theme") {
-            $path = $this->yellow->system->get("coreThemeDirectory");
-            foreach ($this->yellow->toolbox->getDirectoryEntries($path, "/^.*\.css$/", true, false, false) as $entry) {
-                array_push($values, lcfirst(substru($entry, 0, -4)));
-            }
-        } elseif ($key=="language") {
-            foreach ($this->yellow->language->settings as $languageKey=>$languageValue) {
-                array_push($values, $languageKey);
-            }
-        }
-        return $values;
-    }
-    
     // Return system settings modification date, Unix time or HTTP format
     public function getModified($httpFormat = false) {
         return $httpFormat ? $this->yellow->toolbox->getHttpDateFormatted($this->modified) : $this->modified;
@@ -1648,99 +1652,6 @@ class YellowSystem {
     // Check if system setting exists
     public function isExisting($key) {
         return isset($this->settings[$key]);
-    }
-}
-
-class YellowUser {
-    public $yellow;         // access to API
-    public $modified;       // user modification date
-    public $settings;       // user settings
-    public $email;          // current email
-    
-    public function __construct($yellow) {
-        $this->yellow = $yellow;
-        $this->modified = 0;
-        $this->settings = new YellowArray();
-        $this->email = "";
-    }
-
-    // Load user settings from file
-    public function load($fileName) {
-        $this->modified = $this->yellow->toolbox->getFileModified($fileName);
-        $fileData = $this->yellow->toolbox->readFile($fileName);
-        $this->settings = $this->yellow->toolbox->getTextSettings($fileData, "email");
-        if ($this->yellow->system->get("coreDebugMode")>=2) echo "YellowUser::load file:$fileName<br/>\n";
-    }
-
-    // Save user settings to file
-    public function save($fileName, $email, $settings) {
-        $this->modified = time();
-        $settingsNew = new YellowArray();
-        $settingsNew["email"] = $email;
-        foreach ($settings as $key=>$value) {
-            if (!empty($key) && !strempty($value)) {
-                $this->setUser($key, $value, $email);
-                $settingsNew[$key] = $value;
-            }
-        }
-        $fileData = $this->yellow->toolbox->readFile($fileName);
-        $fileData = $this->yellow->toolbox->setTextSettings($fileData, "email", $email, $settingsNew);
-        return $this->yellow->toolbox->createFile($fileName, $fileData);
-    }
-    
-    // Remove user settings from file
-    public function remove($fileName, $email) {
-        $this->modified = time();
-        if (isset($this->settings[$email])) unset($this->settings[$email]);
-        $fileData = $this->yellow->toolbox->readFile($fileName);
-        $fileData = $this->yellow->toolbox->unsetTextSettings($fileData, "email", $email);
-        return $this->yellow->toolbox->createFile($fileName, $fileData);
-    }
-    
-    // Set current email
-    public function set($email) {
-        $this->email = $email;
-    }
-    
-    // Set user setting
-    public function setUser($key, $value, $email) {
-        if (!isset($this->settings[$email])) $this->settings[$email] = new YellowArray();
-        $this->settings[$email][$key] = $value;
-    }
-    
-    // Return user setting
-    public function getUser($key, $email = "") {
-        if (empty($email)) $email = $this->email;
-        return isset($this->settings[$email]) && isset($this->settings[$email][$key]) ? $this->settings[$email][$key] : "";
-    }
-
-    // Return user setting, HTML encoded
-    public function getUserHtml($key, $email = "") {
-        return htmlspecialchars($this->getUser($key, $email));
-    }
-
-    // Return user settings
-    public function getSettings($email = "") {
-        $settings = array();
-        if (empty($email)) $email = $this->email;
-        if (isset($this->settings[$email])) $settings = $this->settings[$email]->getArrayCopy();
-        return $settings;
-    }
-    
-    // Return user settings modification date, Unix time or HTTP format
-    public function getModified($httpFormat = false) {
-        return $httpFormat ? $this->yellow->toolbox->getHttpDateFormatted($this->modified) : $this->modified;
-    }
-    
-    // Check if user setting exists
-    public function isUser($key, $email = "") {
-        if (empty($email)) $email = $this->email;
-        return isset($this->settings[$email]) && isset($this->settings[$email][$key]);
-    }
-    
-    // Check if user exists
-    public function isExisting($email) {
-        return isset($this->settings[$email]);
     }
 }
 
@@ -1759,30 +1670,18 @@ class YellowLanguage {
         $this->language = "";
     }
     
-    // Load language settings from file or directory
+    // Load language settings from file
     public function load($fileName) {
-        if (substru($fileName, -1, 1)!="/") {
-            $path = dirname($fileName);
-            $regex = "/^".basename($fileName)."$/";
-        } else {
-            $path = $fileName;
-            $regex = "/^.*\.txt$/";
-        }
-        foreach ($this->yellow->toolbox->getDirectoryEntries($path, $regex, true, false) as $entry) {
-            $this->modified = max($this->modified, filemtime($entry));
-            $fileData = $this->yellow->toolbox->readFile($entry);
-            $settings = $this->yellow->toolbox->getTextSettings($fileData, "language");
-            foreach ($settings as $language=>$block) {
-                if (!isset($this->settings[$language])) {
-                    $this->settings[$language] = $block;
-                } else {
-                    foreach ($block as $key=>$value) {
-                        $this->settings[$language][$key] = $value;
-                    }
-                }
+        $this->modified = $this->yellow->toolbox->getFileModified($fileName);
+        $fileData = $this->yellow->toolbox->readFile($fileName);
+        $settings = $this->yellow->toolbox->getTextSettings($fileData, "language");
+        foreach ($settings as $language=>$block) {
+            if (!isset($this->settings[$language])) $this->settings[$language] = new YellowArray();
+            foreach ($block as $key=>$value) {
+                $this->settings[$language][$key] = $value;
             }
-            if ($this->yellow->system->get("coreDebugMode")>=2) echo "YellowLanguage::load file:$entry<br/>\n";
         }
+        if ($this->yellow->system->get("coreDebugMode")>=2) echo "YellowLanguage::load file:$fileName<br/>\n";
         foreach ($this->settings->getArrayCopy() as $key=>$value) {
             if (!isset($this->settings[$key]["languageDescription"])) {
                 unset($this->settings[$key]);
@@ -1799,9 +1698,16 @@ class YellowLanguage {
         $this->language = $language;
     }
     
-    // Set default language setting
-    public function setDefault($key) {
-        $this->settingsDefaults[$key] = true;
+    // Set default language settings
+    public function setDefault($text) {
+        $settings = $this->yellow->toolbox->getTextSettings($text, "language");
+        foreach ($settings as $language=>$block) {
+            if (!isset($this->settings[$language])) $this->settings[$language] = new YellowArray();
+            foreach ($block as $key=>$value) {
+                $this->settings[$language][$key] = $value;
+                $this->settingsDefaults[$key] = true;
+            }
+        }
     }
     
     // Set language setting
@@ -1922,6 +1828,99 @@ class YellowLanguage {
     }
 }
 
+class YellowUser {
+    public $yellow;         // access to API
+    public $modified;       // user modification date
+    public $settings;       // user settings
+    public $email;          // current email
+    
+    public function __construct($yellow) {
+        $this->yellow = $yellow;
+        $this->modified = 0;
+        $this->settings = new YellowArray();
+        $this->email = "";
+    }
+
+    // Load user settings from file
+    public function load($fileName) {
+        $this->modified = $this->yellow->toolbox->getFileModified($fileName);
+        $fileData = $this->yellow->toolbox->readFile($fileName);
+        $this->settings = $this->yellow->toolbox->getTextSettings($fileData, "email");
+        if ($this->yellow->system->get("coreDebugMode")>=2) echo "YellowUser::load file:$fileName<br/>\n";
+    }
+
+    // Save user settings to file
+    public function save($fileName, $email, $settings) {
+        $this->modified = time();
+        $settingsNew = new YellowArray();
+        $settingsNew["email"] = $email;
+        foreach ($settings as $key=>$value) {
+            if (!empty($key) && !strempty($value)) {
+                $this->setUser($key, $value, $email);
+                $settingsNew[$key] = $value;
+            }
+        }
+        $fileData = $this->yellow->toolbox->readFile($fileName);
+        $fileData = $this->yellow->toolbox->setTextSettings($fileData, "email", $email, $settingsNew);
+        return $this->yellow->toolbox->createFile($fileName, $fileData);
+    }
+    
+    // Remove user settings from file
+    public function remove($fileName, $email) {
+        $this->modified = time();
+        if (isset($this->settings[$email])) unset($this->settings[$email]);
+        $fileData = $this->yellow->toolbox->readFile($fileName);
+        $fileData = $this->yellow->toolbox->unsetTextSettings($fileData, "email", $email);
+        return $this->yellow->toolbox->createFile($fileName, $fileData);
+    }
+    
+    // Set current email
+    public function set($email) {
+        $this->email = $email;
+    }
+    
+    // Set user setting
+    public function setUser($key, $value, $email) {
+        if (!isset($this->settings[$email])) $this->settings[$email] = new YellowArray();
+        $this->settings[$email][$key] = $value;
+    }
+    
+    // Return user setting
+    public function getUser($key, $email = "") {
+        if (empty($email)) $email = $this->email;
+        return isset($this->settings[$email]) && isset($this->settings[$email][$key]) ? $this->settings[$email][$key] : "";
+    }
+
+    // Return user setting, HTML encoded
+    public function getUserHtml($key, $email = "") {
+        return htmlspecialchars($this->getUser($key, $email));
+    }
+
+    // Return user settings
+    public function getSettings($email = "") {
+        $settings = array();
+        if (empty($email)) $email = $this->email;
+        if (isset($this->settings[$email])) $settings = $this->settings[$email]->getArrayCopy();
+        return $settings;
+    }
+    
+    // Return user settings modification date, Unix time or HTTP format
+    public function getModified($httpFormat = false) {
+        return $httpFormat ? $this->yellow->toolbox->getHttpDateFormatted($this->modified) : $this->modified;
+    }
+    
+    // Check if user setting exists
+    public function isUser($key, $email = "") {
+        if (empty($email)) $email = $this->email;
+        return isset($this->settings[$email]) && isset($this->settings[$email][$key]);
+    }
+    
+    // Check if user exists
+    public function isExisting($email) {
+        return isset($this->settings[$email]);
+    }
+}
+    
 class YellowExtension {
     public $yellow;     // access to API
     public $modified;   // extension modification date
@@ -2905,7 +2904,7 @@ class YellowToolbox {
     }
     
     // Return attributes from text
-    public function getTextAttributes($text) {
+    public function getTextAttributes($text, $attributesAllowEmptyString) {
         $tokens = array();
         $posStart = $posQuote = 0;
         $textLength = strlenb($text);
@@ -2941,7 +2940,7 @@ class YellowToolbox {
             } else {
                 $key = $value = $tokens[$i];
             }
-            if (!strempty($key) && !strempty($value)) {
+            if (!strempty($key) && (!strempty($value) || in_array(strtolower($key), $attributesAllowEmptyString))) {
                 $attributes[$key] = $value;
             }
         }
@@ -3475,9 +3474,10 @@ class YellowToolbox {
         $elementsSvg = array(
             "svg", "altglyph", "altglyphdef", "altglyphitem", "animatecolor", "animatemotion", "animatetransform", "circle", "clippath", "defs", "desc", "ellipse", "feblend", "fecolormatrix", "fecomponenttransfer", "fecomposite", "feconvolvematrix", "fediffuselighting", "fedisplacementmap", "fedistantlight", "feflood", "fefunca", "fefuncb", "fefuncg", "fefuncr", "fegaussianblur", "femerge", "femergenode", "femorphology", "feoffset", "fepointlight", "fespecularlighting", "fespotlight", "fetile", "feturbulence", "filter", "font", "g", "glyph", "glyphref", "hkern", "image", "line", "lineargradient", "marker", "mask", "metadata", "mpath", "path", "pattern", "polygon", "polyline", "radialgradient", "rect", "stop", "switch", "symbol", "text", "textpath", "title", "tref", "tspan", "use", "view", "vkern");
         $attributesHtml = array(
-            "accept", "action", "align", "allow", "allowfullscreen", "alt", "autocomplete", "autoplay", "background", "bgcolor", "border", "cellpadding", "cellspacing", "charset", "checked", "cite", "class", "clear", "color", "cols", "colspan", "content", "contenteditable", "controls", "coords", "crossorigin", "datetime", "default", "dir", "disabled", "download", "enctype", "face", "for", "frameborder", "headers", "height", "hidden", "high", "href", "hreflang", "id", "integrity", "ismap", "label", "lang", "list", "loop", "low", "max", "maxlength", "media", "method", "min", "multiple", "muted", "name", "noshade", "novalidate", "nowrap", "open", "optimum", "pattern", "placeholder", "poster", "prefix", "preload", "property", "pubdate", "radiogroup", "readonly", "rel", "required", "rev", "reversed", "role", "rows", "rowspan", "spellcheck", "scope", "selected", "shape", "size", "sizes", "span", "srclang", "start", "src", "srcset", "step", "style", "summary", "tabindex", "target", "title", "type", "usemap", "valign", "value", "width", "xmlns");
+            "accept", "action", "align", "allow", "allowfullscreen", "alt", "autocomplete", "autoplay", "background", "bgcolor", "border", "cellpadding", "cellspacing", "charset", "checked", "cite", "class", "clear", "color", "cols", "colspan", "content", "contenteditable", "controls", "coords", "crossorigin", "datetime", "default", "dir", "disabled", "download", "enctype", "face", "for", "frameborder", "headers", "height", "hidden", "high", "href", "hreflang", "id", "integrity", "ismap", "label", "lang", "list", "loading", "loop", "low", "max", "maxlength", "media", "method", "min", "multiple", "muted", "name", "noshade", "novalidate", "nowrap", "open", "optimum", "pattern", "placeholder", "poster", "prefix", "preload", "property", "pubdate", "radiogroup", "readonly", "rel", "required", "rev", "reversed", "role", "rows", "rowspan", "spellcheck", "scope", "selected", "shape", "size", "sizes", "span", "srclang", "start", "src", "srcset", "step", "style", "summary", "tabindex", "target", "title", "type", "usemap", "valign", "value", "width", "xmlns");
         $attributesSvg = array(
             "accent-height", "accumulate", "additivive", "alignment-baseline", "ascent", "attributename", "attributetype", "azimuth", "basefrequency", "baseline-shift", "begin", "bias", "by", "class", "clip", "clip-path", "clip-rule", "color", "color-interpolation", "color-interpolation-filters", "color-profile", "color-rendering", "cx", "cy", "d", "datenstrom", "dx", "dy", "diffuseconstant", "direction", "display", "divisor", "dur", "edgemode", "elevation", "end", "fill", "fill-opacity", "fill-rule", "filter", "flood-color", "flood-opacity", "font-family", "font-size", "font-size-adjust", "font-stretch", "font-style", "font-variant", "font-weight", "fx", "fy", "g1", "g2", "glyph-name", "glyphref", "gradientunits", "gradienttransform", "height", "href", "id", "image-rendering", "in", "in2", "k", "k1", "k2", "k3", "k4", "kerning", "keypoints", "keysplines", "keytimes", "lang", "lengthadjust", "letter-spacing", "kernelmatrix", "kernelunitlength", "lighting-color", "local", "marker-end", "marker-mid", "marker-start", "markerheight", "markerunits", "markerwidth", "maskcontentunits", "maskunits", "max", "mask", "media", "method", "mode", "min", "name", "numoctaves", "offset", "operator", "opacity", "order", "orient", "orientation", "origin", "overflow", "paint-order", "path", "pathlength", "patterncontentunits", "patterntransform", "patternunits", "points", "preservealpha", "preserveaspectratio", "r", "rx", "ry", "radius", "refx", "refy", "repeatcount", "repeatdur", "restart", "result", "rotate", "scale", "seed", "shape-rendering", "specularconstant", "specularexponent", "spreadmethod", "stddeviation", "stitchtiles", "stop-color", "stop-opacity", "stroke-dasharray", "stroke-dashoffset", "stroke-linecap", "stroke-linejoin", "stroke-miterlimit", "stroke-opacity", "stroke", "stroke-width", "style", "surfacescale", "tabindex", "targetx", "targety", "transform", "text-anchor", "text-decoration", "text-rendering", "textlength", "type", "u1", "u2", "unicode", "values", "viewbox", "visibility", "vert-adv-y", "vert-origin-x", "vert-origin-y", "width", "word-spacing", "wrap", "writing-mode", "xchannelselector", "ychannelselector", "x", "x1", "x2", "xlink:href", "xml:id", "xml:space", "xmlns", "y", "y1", "y2", "z", "zoomandpan");
+        $attributesAllowEmptyString = array("alt", "value");
         $elementsSafe = $elementsHtml;
         $attributesSafe = $attributesHtml;
         if ($type=="svg") {
@@ -3496,7 +3496,7 @@ class YellowToolbox {
             if (substrb($elementName, 0, 1)=="!") {
                 $output .= "<$elementName$elementMiddle>";
             } elseif (in_array(strtolower($elementName), $elementsSafe)) {
-                $elementAttributes = $this->getTextAttributes($elementMiddle);
+                $elementAttributes = $this->getTextAttributes($elementMiddle, $attributesAllowEmptyString);
                 foreach ($elementAttributes as $key=>$value) {
                     if (!in_array(strtolower($key), $attributesSafe) && !preg_match("/^(aria|data)-/i", $key)) {
                         unset($elementAttributes[$key]);
