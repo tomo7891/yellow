@@ -2,7 +2,7 @@
 // Edit extension, https://github.com/annaesvensson/yellow-edit
 
 class YellowEdit {
-    const VERSION = "0.8.68";
+    const VERSION = "0.8.75";
     public $yellow;         // access to API
     public $response;       // web response
     public $merge;          // text merge
@@ -50,7 +50,7 @@ class YellowEdit {
             }
             $fileDataNew = rtrim($fileDataNew)."\n";
             if ($fileData!=$fileDataNew && !$this->yellow->toolbox->createFile($fileNameUser, $fileDataNew)) {
-                $this->yellow->log("error", "Can't write file '$fileNameUser'!");
+                $this->yellow->toolbox->log("error", "Can't write file '$fileNameUser'!");
             }
         }
     }
@@ -63,7 +63,7 @@ class YellowEdit {
             $scheme = $this->yellow->system->get("coreServerScheme");
             $address = $this->yellow->system->get("coreServerAddress");
             $base = rtrim($this->yellow->system->get("coreServerBase").$this->yellow->system->get("editLocation"), "/");
-            list($scheme, $address, $base, $location, $fileName) = $this->yellow->getRequestInformation($scheme, $address, $base);
+            list($scheme, $address, $base, $location, $fileName) = $this->yellow->lookup->getRequestInformation($scheme, $address, $base);
             $this->yellow->page->setRequestInformation($scheme, $address, $base, $location, $fileName, false);
             $statusCode = $this->processRequest($scheme, $address, $base, $location, $fileName);
         }
@@ -189,7 +189,7 @@ class YellowEdit {
                 "status" => "active");
             $status = $this->yellow->user->save($fileNameUser, $email, $settings) ? "ok" : "error";
             if ($status=="error") echo "ERROR updating settings: Can't write file '$fileNameUser'!\n";
-            $this->yellow->log($status=="ok" ? "info" : "error", "Add user '".strtok($name, " ")."'");
+            $this->yellow->toolbox->log($status=="ok" ? "info" : "error", "Add user '".strtok($name, " ")."'");
         }
         if ($status=="ok") {
             $algorithm = $this->yellow->system->get("editUserHashAlgorithm");
@@ -244,7 +244,7 @@ class YellowEdit {
             $fileNameUser = $this->yellow->system->get("coreExtensionDirectory").$this->yellow->system->get("coreUserFile");
             $status = $this->yellow->user->remove($fileNameUser, $email) ? "ok" : "error";
             if ($status=="error") echo "ERROR updating settings: Can't write file '$fileNameUser'!\n";
-            $this->yellow->log($status=="ok" ? "info" : "error", "Remove user '".strtok($name, " ")."'");
+            $this->yellow->toolbox->log($status=="ok" ? "info" : "error", "Remove user '".strtok($name, " ")."'");
         }
         $statusCode = $status=="ok" ? 200 : 500;
         echo "Yellow $command: User account ".($statusCode!=200 ? "not " : "")."removed\n";
@@ -421,7 +421,7 @@ class YellowEdit {
             $settings = array("failed" => "0", "modified" => date("Y-m-d H:i:s", time()), "status" => "active");
             $this->response->status = $this->yellow->user->save($fileNameUser, $email, $settings) ? "ok" : "error";
             if ($this->response->status=="error") $this->yellow->page->error(500, "Can't write file '$fileNameUser'!");
-            $this->yellow->log($this->response->status=="ok" ? "info" : "error", "Add user '".strtok($name, " ")."'");
+            $this->yellow->toolbox->log($this->response->status=="ok" ? "info" : "error", "Add user '".strtok($name, " ")."'");
         }
         if ($this->response->status=="ok") {
             $this->response->status = $this->response->sendMail($scheme, $address, $base, $email, "welcome") ? "done" : "error";
@@ -574,7 +574,7 @@ class YellowEdit {
             $settings = array("failed" => "0", "modified" => date("Y-m-d H:i:s", time()), "status" => "removed");
             $this->response->status = $this->yellow->user->save($fileNameUser, $email, $settings) ? "ok" : "error";
             if ($this->response->status=="error") $this->yellow->page->error(500, "Can't write file '$fileNameUser'!");
-            $this->yellow->log($this->response->status=="ok" ? "info" : "error", "Remove user '".strtok($name, " ")."'");
+            $this->yellow->toolbox->log($this->response->status=="ok" ? "info" : "error", "Remove user '".strtok($name, " ")."'");
         }
         if ($this->response->status=="ok") {
             $this->response->status = $this->response->sendMail($scheme, $address, $base, $email, "goodbye") ? "ok" : "error";
@@ -1075,7 +1075,7 @@ class YellowEditResponse {
     
     // Return new page
     public function getPageNew($scheme, $address, $base, $location, $fileName, $rawData, $endOfLine) {
-        $rawData = $this->yellow->toolbox->normaliseLines($rawData, $endOfLine);
+        $rawData = $this->yellow->lookup->normaliseLines($rawData, $endOfLine);
         $page = new YellowPage($this->yellow);
         $page->setRequestInformation($scheme, $address, $base, $location, $fileName, false);
         $page->parseMeta($rawData);
@@ -1085,7 +1085,7 @@ class YellowEditResponse {
             $page->fileName = $this->getPageNewFile($page->location, $page->fileName, $page->get("published"));
             while ($this->yellow->content->find($page->location) || is_string_empty($page->fileName)) {
                 $page->rawData = $this->yellow->toolbox->setMetaData($page->rawData, "title", $this->getTitleNext($page->rawData));
-                $page->rawData = $this->yellow->toolbox->normaliseLines($page->rawData, $endOfLine);
+                $page->rawData = $this->yellow->lookup->normaliseLines($page->rawData, $endOfLine);
                 $page->location = $this->getPageNewLocation($page->rawData, $page->location, $page->get("editNewLocation"));
                 $page->fileName = $this->getPageNewFile($page->location, $page->fileName, $page->get("published"));
                 if (++$pageCounter>999) break;
@@ -1104,9 +1104,9 @@ class YellowEditResponse {
     
     // Return modified page
     public function getPageEdit($scheme, $address, $base, $location, $fileName, $rawDataSource, $rawDataEdit, $rawDataFile, $endOfLine) {
-        $rawDataSource = $this->yellow->toolbox->normaliseLines($rawDataSource, $endOfLine);
-        $rawDataEdit = $this->yellow->toolbox->normaliseLines($rawDataEdit, $endOfLine);
-        $rawDataFile = $this->yellow->toolbox->normaliseLines($rawDataFile, $endOfLine);
+        $rawDataSource = $this->yellow->lookup->normaliseLines($rawDataSource, $endOfLine);
+        $rawDataEdit = $this->yellow->lookup->normaliseLines($rawDataEdit, $endOfLine);
+        $rawDataFile = $this->yellow->lookup->normaliseLines($rawDataFile, $endOfLine);
         $rawData = $this->extension->merge->merge($rawDataSource, $rawDataEdit, $rawDataFile);
         $page = new YellowPage($this->yellow);
         $page->setRequestInformation($scheme, $address, $base, $location, $fileName, false);
@@ -1132,7 +1132,7 @@ class YellowEditResponse {
     
     // Return deleted page
     public function getPageDelete($scheme, $address, $base, $location, $fileName, $rawData, $endOfLine) {
-        $rawData = $this->yellow->toolbox->normaliseLines($rawData, $endOfLine);
+        $rawData = $this->yellow->lookup->normaliseLines($rawData, $endOfLine);
         $page = new YellowPage($this->yellow);
         $page->setRequestInformation($scheme, $address, $base, $location, $fileName, false);
         $page->parseMeta($rawData);
@@ -1157,7 +1157,7 @@ class YellowEditResponse {
     
     // Return preview page
     public function getPagePreview($scheme, $address, $base, $location, $fileName, $rawData, $endOfLine) {
-        $rawData = $this->yellow->toolbox->normaliseLines($rawData, $endOfLine);
+        $rawData = $this->yellow->lookup->normaliseLines($rawData, $endOfLine);
         $page = new YellowPage($this->yellow);
         $page->setRequestInformation($scheme, $address, $base, $location, $fileName, false);
         $page->parseMeta($rawData, 200);
@@ -1165,7 +1165,7 @@ class YellowEditResponse {
         $class = "page-preview layout-".$page->get("layout");
         $output = "<div class=\"".htmlspecialchars($class)."\"><div class=\"content\"><div class=\"main\">";
         if ($this->yellow->system->get("editToolbarButtons")!="none") $output .= "<h1>".$page->getHtml("titleContent")."</h1>\n";
-        $output .= $page->getContent();
+        $output .= $page->getContentHtml();
         $output .= "</div></div></div>";
         $page->statusCode = 200;
         $page->outputData = $output;
@@ -1181,7 +1181,7 @@ class YellowEditResponse {
         $file->set("type", $this->yellow->toolbox->getFileType($fileNameShort));
         if ($file->get("type")=="html" || $file->get("type")=="svg") {
             $fileData = $this->yellow->toolbox->readFile($fileNameTemp);
-            $fileData = $this->yellow->toolbox->normaliseData($fileData, $file->get("type"));
+            $fileData = $this->yellow->lookup->normaliseData($fileData, $file->get("type"));
             if (is_string_empty($fileData) || !$this->yellow->toolbox->createFile($fileNameTemp, $fileData)) {
                 $file->error(500, "Can't write file '$fileNameTemp'!");
             }
@@ -1256,8 +1256,8 @@ class YellowEditResponse {
             $data["editKeyboardShortcuts"] = $this->yellow->system->get("editKeyboardShortcuts");
             $data["editToolbarButtons"] = $this->getToolbarButtons();
             $data["editStatusValues"] = $this->getStatusValues();
-            $data["emojiawesomeToolbarButtons"] = $this->yellow->system->get("emojiawesomeToolbarButtons");
-            $data["fontawesomeToolbarButtons"] = $this->yellow->system->get("fontawesomeToolbarButtons");
+            $data["emojiToolbarButtons"] = $this->yellow->system->get("emojiToolbarButtons");
+            $data["iconToolbarButtons"] = $this->yellow->system->get("iconToolbarButtons");
             if ($this->isUserAccess("configure")) {
                 $data["sitename"] = $this->yellow->system->get("sitename");
                 $data["author"] = $this->yellow->system->get("author");
@@ -1316,8 +1316,8 @@ class YellowEditResponse {
         $toolbarButtons = $this->yellow->system->get("editToolbarButtons");
         if ($toolbarButtons=="auto") {
             $toolbarButtons = "format, bold, italic, strikethrough, code, separator, list, link, file";
-            if ($this->yellow->extension->isExisting("emojiawesome")) $toolbarButtons .= ", emojiawesome";
-            if ($this->yellow->extension->isExisting("fontawesome")) $toolbarButtons .= ", fontawesome";
+            if ($this->yellow->extension->isExisting("emoji")) $toolbarButtons .= ", emoji";
+            if ($this->yellow->extension->isExisting("icon")) $toolbarButtons .= ", icon";
             $toolbarButtons .= ", status, preview";
         }
         return $toolbarButtons;
@@ -1581,7 +1581,7 @@ class YellowEditResponse {
             $expire = time() + 60*60*24;
             $actionToken = $this->createActionToken($email, $action, $expire);
             $locationArguments = "/action:$action/email:$email/expire:$expire/language:$userLanguage/actiontoken:$actionToken/";
-            $url = "$scheme://$address$base".$this->yellow->toolbox->normaliseArguments($locationArguments, false, false);
+            $url = "$scheme://$address$base".$this->yellow->lookup->normaliseArguments($locationArguments, false, false);
         }
         $prefix = "edit".ucfirst($action);
         $message = $this->yellow->language->getText("{$prefix}Message", $userLanguage);
@@ -1592,17 +1592,20 @@ class YellowEditResponse {
         $message = preg_replace("/@userlanguage/i", $userLanguage, $message);
         $sitename = $this->yellow->system->get("sitename");
         $siteEmail = $this->yellow->system->get("editSiteEmail");
+        $subject = $this->yellow->language->getText("{$prefix}Subject", $userLanguage);
         $footer = $this->yellow->language->getText("editMailFooter", $userLanguage);
         $footer = str_replace("\\n", "\r\n", $footer);
         $footer = preg_replace("/@sitename/i", $sitename, $footer);
-        $mailTo = mb_encode_mimeheader("$userName")." <$userEmail>";
-        $mailSubject = mb_encode_mimeheader($this->yellow->language->getText("{$prefix}Subject", $userLanguage));
-        $mailHeaders = mb_encode_mimeheader("From: $sitename")." <$siteEmail>\r\n";
-        $mailHeaders .= mb_encode_mimeheader("X-Request-Url: $scheme://$address$base")."\r\n";
-        $mailHeaders .= "Mime-Version: 1.0\r\n";
-        $mailHeaders .= "Content-Type: text/plain; charset=utf-8\r\n";
+        $mailHeaders = array(
+            "To" => "$userName <$userEmail>",
+            "From" => "$sitename <$siteEmail>",
+            "Subject" => $subject,
+            "Date" => date(DATE_RFC2822),
+            "Mime-Version" => "1.0",
+            "Content-Type" => "text/plain; charset=utf-8",
+            "X-Request-Url" => "$scheme://$address$base");
         $mailMessage = "$message\r\n\r\n$url\r\n-- \r\n$footer";
-        return mail($mailTo, $mailSubject, $mailMessage, $mailHeaders);
+        return $this->yellow->toolbox->mail($action, $mailHeaders, $mailMessage);
     }
     
     // Create browser cookies
